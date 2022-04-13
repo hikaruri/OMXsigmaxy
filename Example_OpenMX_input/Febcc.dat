@@ -1,0 +1,146 @@
+#
+# File Name
+#
+
+System.CurrrentDirectory         ./    # default=./
+System.Name                      fe
+level.of.stdout                   1    # default=1 (1-3)
+level.of.fileout                  0    # default=1 (1-3)
+
+#
+# Definition of Atomic Species
+#
+
+Species.Number       2
+<Definition.of.Atomic.Species
+     Fe       Fe6.0S-s3p3d2f1  Fe_PBE13S
+  objFe   Fe6.0S-s1p1d1f1  Fe_PBE13S
+Definition.of.Atomic.Species>
+
+#
+# Atoms
+#
+
+Atoms.Number         1
+Atoms.SpeciesAndCoordinates.Unit   FRAC  # Ang|AU
+<Atoms.SpeciesAndCoordinates           
+ 1  Fe  0.0000    0.0000    0.0000     8.0 6.0
+Atoms.SpeciesAndCoordinates>
+
+Atoms.UnitVectors.Unit             Ang # Ang|AU
+<Atoms.UnitVectors                     
+   1.4350   1.4350  -1.4350
+  -1.4350   1.4350   1.4350
+   1.4350  -1.4350   1.4350
+Atoms.UnitVectors>
+
+#
+# SCF or Electronic System
+#
+
+scf.XcType                 GGA-PBE     # LDA|LSDA-CA|LSDA-PW
+scf.SpinPolarization        NC         # On|Off
+scf.ElectronicTemperature  300.0       # default=300 (K)
+scf.energycutoff           300.0       # default=150 (Ry)
+scf.Ngrid                 32 32 32   
+scf.maxIter                 100        # default=40
+scf.EigenvalueSolver      band         # Recursion|Cluster|Band
+scf.Kgrid                 36 36 36     # means n1 x n2 x n3
+scf.Mixing.Type            rmm-diisk   # Simple|Rmm-Diis|Gr-Pulay
+scf.Init.Mixing.Weight     0.020       # default=0.30 
+scf.Min.Mixing.Weight      0.001       # default=0.001 
+scf.Max.Mixing.Weight      0.400       # default=0.40 
+scf.Mixing.History         30          # default=5
+scf.Mixing.StartPulay      10          # default=6
+scf.criterion             1.0e-9       # default=1.0e-6 (Hartree) 
+
+scf.SpinOrbit.Coupling      On         # On|Off, default=off 
+HS.fileout                  on
+#
+# MD or Geometry Optimization
+#
+
+MD.Type                     nomd       # Nomd|Opt|DIIS|NVE|NVT_VS|NVT_NH
+MD.maxIter                    1        # default=1
+MD.TimeStep                   1        # default=0.5 (fs)
+MD.Opt.criterion         1.0e-5        # default=1.0e-4 (Hartree/bohr)
+
+
+
+#
+# DOS and PDOS
+#
+
+Dos.fileout                  off        # on|off, default=off
+Dos.Erange              -5.  5.0    # default = -20 20 
+Dos.Kgrid                 51 51 51     # default = Kgrid1 Kgrid2 Kgrid3
+
+
+
+
+
+#
+# Band dispersion 
+#
+
+Band.dispersion              on        # on|off, default=off
+# if <Band.KPath.UnitCell does not exist,
+#     the reciprical lattice vector is employed. 
+<Band.KPath.UnitCell
+ 2.87  0.00  0.00
+ 0.00  2.87  0.00
+ 0.00  0.00  2.87
+Band.KPath.UnitCell>
+Band.Nkpath                4
+<Band.kpath
+  200   0.0 0.0 0.0   1.0 0.0 0.0       G  H
+  200   1.0 0.0 0.0   0.5 0.5 0.0       H  N
+  200   0.5 0.5 0.0   0.0 0.0 0.0       N  G
+  200   0.0 0.0 0.0   0.5 0.5 0.5       G  P
+Band.kpath>
+
+
+
+#
+# Generation of Wannier functions
+#
+
+Wannier90.fileout on
+Wannier.Func.Calc        on            # on|off, default=off 
+Wannier.Func.Num         18             # default=0
+Wannier.Outer.Window.Bottom -10.0       # default=-10.0 (eV)
+Wannier.Outer.Window.Top     30.0       # default= 10.0 (eV)
+Wannier.Inner.Window.Bottom  -10.0       # default= 0.0 (eV)
+Wannier.Inner.Window.Top      3.0       # default= 0.0 (eV)
+Wannier.Initial.Guess          on       # on|off, default=on
+
+Wannier.Initial.Projectors.Unit FRAC    # AU, ANG or FRAC 
+<Wannier.Initial.Projectors
+ objFe-s 0.000 0.000 0.000  1.0 0.0 0.0  0.0 0.0  1.0
+ objFe-p 0.000 0.000 0.000  1.0 0.0 0.0  0.0 0.0  1.0
+ objFe-d 0.000 0.000 0.000  1.0 0.0 0.0  0.0 0.0  1.0
+ objFe-s 0.000 0.000 0.000  1.0 0.0 0.0  0.0 0.0  1.0
+ objFe-p 0.000 0.000 0.000  1.0 0.0 0.0  0.0 0.0  1.0
+ objFe-d 0.000 0.000 0.000  1.0 0.0 0.0  0.0 0.0  1.0
+Wannier.Initial.Projectors>
+
+Wannier.Kgrid   12 12 12                        # default=4x4x4
+Wannier.MaxShells   12                       # default=12
+Wannier.Interpolated.Bands              on   # on|off, default=off
+
+Wannier.Function.Plot                   on   # on|off, default=off
+Wannier.Function.Plot.SuperCells     1 1 1   # default=0 0 0 
+
+
+
+Wannier.Dis.Mixing.Para                0.5    # default=0.5  
+Wannier.Dis.Conv.Criterion               1  # default=1e-8
+Wannier.Dis.SCF.Max.Steps                0    # default=200
+Wannier.Minimizing.Max.Steps             0    # default=200
+Wannier.Minimizing.Scheme                2    # 0=SD, 1=CG, 2=SD+CG
+Wannier.Minimizing.StepLength           0.1   # default=2.0
+Wannier.Minimizing.Secant.Steps          5    # default=5   
+Wannier.Minimizing.Secant.StepLength    0.5   # default=2.0 
+Wannier.Minimizing.Conv.Criterion         1   # default=1e-8 
+
+Wannier.Readin.Overlap.Matrix          off   # on|off, default=off

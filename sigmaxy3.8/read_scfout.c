@@ -1,0 +1,1802 @@
+/**********************************************************************
+  read_scfout.c:
+
+  read_scfout.c is a subroutine to read a binary file,
+  filename.scfout.
+
+  Log of read_scfout.c:
+
+  2/July/2003  Released by T.Ozaki
+  22/August/2011  Released by H.Kotaka
+  XX/XXX/2019  Modified by N. Yamaguchi
+
+ ***********************************************************************/
+
+/* Added by N. Yamaguchi ***/
+#if !defined HWF || defined HWF && defined DEBUG_HWF_A
+/* ***/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include "read_scfout.h"
+
+#define MAX_LINE_SIZE 256
+#define fp_bsize         1048576     /* buffer size for setvbuf */
+
+/* Added by N. Yamaguchi ***/
+/* ***
+Note: Use "FREAD" instead of "fread" to avoid the mismatch of endianness. Every "fread" in "read_scfout.c" was replaced with "FREAD".
+ * ***/
+#define LATEST_VERSION 2
+#define FREAD(POINTER, SIZE, NUMBER, FILE_POINTER)\
+  do {\
+    fread(POINTER, SIZE, NUMBER, FILE_POINTER);\
+    if (conversionSwitch){\
+      int dATA;\
+      for (dATA=0; dATA<NUMBER; dATA++){\
+	char *out=(char*)(POINTER+dATA);\
+	int bYTE;\
+	for (bYTE=0; bYTE<SIZE/2; bYTE++){\
+	  char tmp=out[bYTE];\
+	  out[bYTE]=out[SIZE-bYTE-1];\
+	  out[SIZE-bYTE-1]=tmp;\
+	}\
+      }\
+    }\
+  } while (0)
+/* ***/
+
+#ifdef nompi
+#include "mimic_mpi.h"
+#else
+#include "mpi.h"
+#endif
+
+/* Modified by N. Yamaguchi ***/
+#ifndef SOField
+static void Input( FILE *fp );
+#else
+static void Input( FILE *fp, int Print_datFile);
+#endif
+/* ***/
+
+/* Modified by N. Yamaguchi ***/
+#ifndef SOField
+void read_scfout(char *argv[])
+#else
+void read_scfout(char *filename_wf, int Print_datFile)
+#endif
+  /* ***/
+
+{
+  static FILE *fp;
+
+  /* Added by N. Yamaguchi ***/
+#ifdef xt3
+  /* ***/
+
+  char buf[fp_bsize];          /* setvbuf */
+
+  /* Added by N. Yamaguchi ***/
+#endif
+  /* ***/
+
+  /* Modified by N. Yamaguchi ***/
+#ifndef SOField
+  if ((fp = fopen(argv[1],"r")) != NULL){
+
+#ifdef xt3
+    setvbuf(fp,buf,_IOFBF,fp_bsize);  /* setvbuf */
+#endif
+
+    printf("\nRead the scfout file (%s)\n",argv[1]);fflush(stdout);
+    Input(fp);
+
+    fclose(fp);
+  }
+#else
+  if ((fp = fopen(filename_wf,"r")) != NULL){
+
+#ifdef xt3
+    setvbuf(fp,buf,_IOFBF,fp_bsize);  /* setvbuf */
+#endif
+
+    Input(fp, Print_datFile);
+
+    fclose(fp);
+  }
+#endif
+  /* ***/
+
+  else {
+
+    /* Modified by N. Yamaguchi ***/
+#ifndef SOField
+    printf("Failure of reading the scfout file (%s).\n",argv[1]);fflush(stdout);
+#else
+    printf("Failure of reading the scfout file (%s).\n",filename_wf);fflush(stdout);
+#ifndef WOMPI
+    MPI_Abort(MPI_COMM_WORLD, 1);
+#else
+    exit(1);
+#endif
+#endif
+    /* ***/
+
+  }
+
+}
+
+
+/* Modified by N. Yamaguchi ***/
+#ifndef SOField
+void Input( FILE *fp )
+#else
+void Input( FILE *fp, int Print_datFile)
+#endif
+  /* ***/
+
+{
+  static int Gc_AN,ct_AN,h_AN,i,j,can,Gh_AN;
+  static int wan1,wan2,TNO1,TNO2,spin,Rn,num_lines;
+  static int k,q_AN,Gq_AN;
+  static int i_vec[20],*p_vec;
+  static double d_vec[20];
+  static char makeinp[100];
+  static char strg[MAX_LINE_SIZE];
+  FILE *fp_makeinp;
+  char buf[fp_bsize];          /* setvbuf */
+
+  /****************************************************
+    atomnum
+    spinP_switch
+    version (added by N. Yamaguchi)
+   ****************************************************/
+
+  fread(i_vec,sizeof(int),6,fp);
+
+  /* Disabled by N. Yamaguchi
+   * atomnum      = i_vec[0];
+   * SpinP_switch = i_vec[1];
+   * Catomnum =     i_vec[2];
+   * Latomnum =     i_vec[3];
+   * Ratomnum =     i_vec[4];
+   * TCpyCell =     i_vec[5];
+   */
+
+
+  /* Added by N. Yamaguchi ***/
+  int conversionSwitch;
+  if (i_vec[1]==0 && i_vec[0]>65535 || i_vec[1]<0 || i_vec[1]>(LATEST_VERSION)*4+3){
+
+    /* ***
+    puts("Error: Mismatch of the endianness");fflush(stdout);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+    * ***/
+
+    conversionSwitch=1;
+    int i;
+    for (i=0; i<6; i++){
+      int value=*(i_vec+i);
+      char *in=(char*)&value;
+      char *out=(char*)(i_vec+i);
+      int j;
+      for (j=0; j<sizeof(int); j++){
+	out[j]=in[sizeof(int)-j-1];
+      }
+    }
+    if (i_vec[1]==0 && i_vec[0]>65535 || i_vec[1]<0 || i_vec[1]>(LATEST_VERSION)*4+3){
+      puts("Error: Mismatch of the endianness");fflush(stdout);
+      MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+  } else {
+    conversionSwitch=0;
+  }
+  /* ***/
+
+  atomnum      = i_vec[0];
+
+  /* Disabled by N. Yamaguchi ***
+  SpinP_switch = i_vec[1];
+  * ***/
+
+  /* Added by N. Yamaguchi ***/
+  SpinP_switch=i_vec[1]%4;
+  version=i_vec[1]/4;
+  int myid=0;
+#ifndef WOMPI
+  MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+#endif
+  char* openmxVersion;
+  if (version==0){
+    openmxVersion="3.7, 3.8 or an older distribution.";
+  } else if (version==1){
+    openmxVersion="3.7.x (for development of HWC)";
+  } else if (version==2){
+    openmxVersion="3.7.x (for development of HWF)";
+  } else if (version==3){
+    openmxVersion="3.9";
+  }
+  if (myid==0){
+    puts("***");
+    printf("This SCFOUT file was generated by OpenMX Ver. %s.\n", openmxVersion);
+    puts("And it supports the following functions:");
+    if (version==0){
+      puts("- jx");
+      puts("- polB");
+    } else if (version==1){
+      puts("- jx");
+      puts("- polB");
+      puts("- HWC");
+    } else if (version==2){
+      puts("- jx");
+      puts("- polB");
+      puts("- HWC (with a function to calculate HWF)");
+      puts("- HWF (as a function of OpenMX)");
+    } else if (version==3){
+      puts("- jx");
+      puts("- polB");
+      puts("- HWC");
+    }
+    puts("***");
+  }
+  /* ***/
+
+  Catomnum =     i_vec[2];
+  Latomnum =     i_vec[3];
+  Ratomnum =     i_vec[4];
+  TCpyCell =     i_vec[5];
+
+  /****************************************************
+    order_max (added by N. Yamaguchi for HWC)
+   ****************************************************/
+
+  if (version){
+    FREAD(i_vec, sizeof(int), 1, fp);
+    order_max=i_vec[0];
+  }
+
+  /****************************************************
+    allocation of arrays:
+
+    double atv[TCpyCell+1][4];
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  atv = (double**)malloc(sizeof(double*)*(TCpyCell+1));
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    atv[Rn] = (double*)malloc(sizeof(double)*4);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  atv_HWF = (double**)malloc(sizeof(double*)*(TCpyCell+1));
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    atv_HWF[Rn] = (double*)malloc(sizeof(double)*4);
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    read atv[TCpyCell+1][4];
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    FREAD(atv[Rn],sizeof(double),4,fp);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  /* ***/
+
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    FREAD(atv_HWF[Rn],sizeof(double),4,fp);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#endif
+  /* ***/
+
+  /****************************************************
+    allocation of arrays:
+
+    int atv_ijk[TCpyCell+1][4];
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  atv_ijk = (int**)malloc(sizeof(int*)*(TCpyCell+1));
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    atv_ijk[Rn] = (int*)malloc(sizeof(int)*4);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  atv_ijk_HWF = (int**)malloc(sizeof(int*)*(TCpyCell+1));
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    atv_ijk_HWF[Rn] = (int*)malloc(sizeof(int)*4);
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    read atv_ijk[TCpyCell+1][4];
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    FREAD(atv_ijk[Rn],sizeof(int),4,fp);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    FREAD(atv_ijk_HWF[Rn],sizeof(int),4,fp);
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    allocation of arrays:
+
+    int Total_NumOrbs[atomnum+1];
+    int FNAN[atomnum+1];
+   ****************************************************/
+
+  Total_NumOrbs = (int*)malloc(sizeof(int)*(atomnum+1));
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  FNAN = (int*)malloc(sizeof(int)*(atomnum+1));
+
+  /* Added by N. Yamaguchi ***/
+#else
+  FNAN_HWF = (int*)malloc(sizeof(int)*(atomnum+1));
+#endif
+  /* ***/
+
+  /****************************************************
+    the number of orbitals in each atom
+   ****************************************************/
+
+  p_vec = (int*)malloc(sizeof(int)*atomnum);
+  FREAD(p_vec,sizeof(int),atomnum,fp);
+  Total_NumOrbs[0] = 1;
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    Total_NumOrbs[ct_AN] = p_vec[ct_AN-1];
+  }
+  free(p_vec);
+
+  /****************************************************
+    FNAN[]:
+    the number of first nearest neighbouring atoms
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  p_vec = (int*)malloc(sizeof(int)*atomnum);
+  FREAD(p_vec,sizeof(int),atomnum,fp);
+  FNAN[0] = 0;
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FNAN[ct_AN] = p_vec[ct_AN-1];
+  }
+  free(p_vec);
+
+  /* Added by N. Yamaguchi ***/
+#else
+  /* ***/
+
+  p_vec = (int*)malloc(sizeof(int)*atomnum);
+  FREAD(p_vec,sizeof(int),atomnum,fp);
+  FNAN_HWF[0] = 0;
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FNAN_HWF[ct_AN] = p_vec[ct_AN-1];
+  }
+  free(p_vec);
+
+  /* Added by N. Yamaguchi ***/
+#endif
+  /* ***/
+
+  /****************************************************
+    allocation of arrays:
+
+    int natn[atomnum+1][FNAN[ct_AN]+1];
+    int ncn[atomnum+1][FNAN[ct_AN]+1];
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  natn = (int**)malloc(sizeof(int*)*(atomnum+1));
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    natn[ct_AN] = (int*)malloc(sizeof(int)*(FNAN[ct_AN]+1));
+  }
+
+  ncn = (int**)malloc(sizeof(int*)*(atomnum+1));
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    ncn[ct_AN] = (int*)malloc(sizeof(int)*(FNAN[ct_AN]+1));
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  natn_HWF = (int**)malloc(sizeof(int*)*(atomnum+1));
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    natn_HWF[ct_AN] = (int*)malloc(sizeof(int)*(FNAN_HWF[ct_AN]+1));
+  }
+
+  ncn_HWF = (int**)malloc(sizeof(int*)*(atomnum+1));
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    ncn_HWF[ct_AN] = (int*)malloc(sizeof(int)*(FNAN_HWF[ct_AN]+1));
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    natn[][]:
+    grobal index of neighboring atoms of an atom ct_AN
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FREAD(natn[ct_AN],sizeof(int),FNAN[ct_AN]+1,fp);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FREAD(natn_HWF[ct_AN],sizeof(int),FNAN_HWF[ct_AN]+1,fp);
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    ncn[][]:
+    grobal index for cell of neighboring atoms
+    of an atom ct_AN
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FREAD(ncn[ct_AN],sizeof(int),FNAN[ct_AN]+1,fp);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FREAD(ncn_HWF[ct_AN],sizeof(int),FNAN_HWF[ct_AN]+1,fp);
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    tv[4][4]:
+    unit cell vectors in Bohr
+   ****************************************************/
+
+  FREAD(tv[1],sizeof(double),4,fp);
+  FREAD(tv[2],sizeof(double),4,fp);
+  FREAD(tv[3],sizeof(double),4,fp);
+
+  /****************************************************
+    rtv[4][4]:
+    unit cell vectors in Bohr
+   ****************************************************/
+
+  FREAD(rtv[1],sizeof(double),4,fp);
+  FREAD(rtv[2],sizeof(double),4,fp);
+  FREAD(rtv[3],sizeof(double),4,fp);
+
+  /****************************************************
+    Gxyz[][1-3]:
+    atomic coordinates in Bohr
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  Gxyz = (double**)malloc(sizeof(double*)*(atomnum+1));
+  for (i=0; i<(atomnum+1); i++){
+    Gxyz[i] = (double*)malloc(sizeof(double)*60);
+  }
+
+  /* Added by N. Yamaguchi ***/
+#endif
+  /* ***/
+
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    FREAD(Gxyz[ct_AN],sizeof(double),4,fp);
+  }
+
+  /****************************************************
+    allocation of arrays:
+
+    Kohn-Sham Hamiltonian
+
+    dooble Hks[SpinP_switch+1]
+    [atomnum+1]
+    [FNAN[ct_AN]+1]
+    [Total_NumOrbs[ct_AN]]
+    [Total_NumOrbs[h_AN]];
+
+    Overlap matrix
+
+    dooble OLP[atomnum+1]
+    [FNAN[ct_AN]+1]
+    [Total_NumOrbs[ct_AN]]
+    [Total_NumOrbs[h_AN]]; 
+
+    Overlap matrix with position operator x, y, z
+
+    dooble OLPpox,y,z
+    [atomnum+1]
+    [FNAN[ct_AN]+1]
+    [Total_NumOrbs[ct_AN]]
+    [Total_NumOrbs[h_AN]]; 
+
+    Density matrix
+
+    dooble DM[SpinP_switch+1]
+    [atomnum+1]
+    [FNAN[ct_AN]+1]
+    [Total_NumOrbs[ct_AN]]
+    [Total_NumOrbs[h_AN]];
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  Hks = (double*****)malloc(sizeof(double****)*(SpinP_switch+1));
+  for (spin=0; spin<=SpinP_switch; spin++){
+
+    Hks[spin] = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      Hks[spin][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	Hks[spin][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  Hks[spin][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+  if (SpinP_switch==3){
+    /* ***/
+
+    iHks = (double*****)malloc(sizeof(double****)*3);
+    for (spin=0; spin<3; spin++){
+
+      iHks[spin] = (double****)malloc(sizeof(double***)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	iHks[spin][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+	for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	  iHks[spin][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	  if (ct_AN==0){
+	    TNO2 = 1;
+	  }
+	  else{
+	    Gh_AN = natn[ct_AN][h_AN];
+	    TNO2 = Total_NumOrbs[Gh_AN];
+	  }
+	  for (i=0; i<TNO1; i++){
+	    iHks[spin][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	    for (j=0; j<TNO2; j++) iHks[spin][ct_AN][h_AN][i][j] = 0.0;
+	  }
+	}
+      }
+    }
+
+    /* Added by N. Yamaguchi ***/
+  }
+  /* ***/
+
+  /* Added by N. Yamaguchi ***/
+#else
+  Hks = (double*****)malloc(sizeof(double****)*(SpinP_switch+1));
+  for (spin=0; spin<=SpinP_switch; spin++){
+
+    Hks[spin] = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      Hks[spin][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	Hks[spin][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn_HWF[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  Hks[spin][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+  }
+
+  if (SpinP_switch==3){
+    iHks = (double*****)malloc(sizeof(double****)*3);
+    for (spin=0; spin<3; spin++){
+
+      iHks[spin] = (double****)malloc(sizeof(double***)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	iHks[spin][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+	for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	  iHks[spin][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	  if (ct_AN==0){
+	    TNO2 = 1;
+	  }
+	  else{
+	    Gh_AN = natn_HWF[ct_AN][h_AN];
+	    TNO2 = Total_NumOrbs[Gh_AN];
+	  }
+	  for (i=0; i<TNO1; i++){
+	    iHks[spin][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	    for (j=0; j<TNO2; j++) iHks[spin][ct_AN][h_AN][i][j] = 0.0;
+	  }
+	}
+      }
+    }
+  }
+#endif
+  /* ***/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  OLP = (double****)malloc(sizeof(double***)*(atomnum+1));
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    TNO1 = Total_NumOrbs[ct_AN];
+    OLP[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+    for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+      OLP[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+      if (ct_AN==0){
+	TNO2 = 1;
+      }
+      else{
+	Gh_AN = natn[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+      }
+      for (i=0; i<TNO1; i++){
+	OLP[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  OLP_HWF = (double****)malloc(sizeof(double***)*(atomnum+1));
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    TNO1 = Total_NumOrbs[ct_AN];
+    OLP_HWF[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+    for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+      OLP_HWF[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+      if (ct_AN==0){
+	TNO2 = 1;
+      }
+      else{
+	Gh_AN = natn_HWF[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+      }
+      for (i=0; i<TNO1; i++){
+	OLP_HWF[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+      }
+    }
+  }
+#endif
+  /* ***/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef OLPPOLINEAR
+  if (version){
+    int direction, order;
+
+    /* Added by N. Yamaguchi ***/
+#ifndef HWF
+    /* ***/
+
+    OLPpo=(double******)malloc(sizeof(double*****)*3);
+    for (direction=0; direction<3; direction++){
+      OLPpo[direction]=(double*****)malloc(sizeof(double****)*order_max);
+      for (order=0; order<order_max; order++){
+	OLPpo[direction][order]=(double****)malloc(sizeof(double***)*(atomnum+1));
+	for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	  TNO1 = Total_NumOrbs[ct_AN];
+	  OLPpo[direction][order][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+	  for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	    OLPpo[direction][order][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	    if (ct_AN==0){
+	      TNO2 = 1;
+	    }
+	    else{
+	      Gh_AN = natn[ct_AN][h_AN];
+	      TNO2 = Total_NumOrbs[Gh_AN];
+	    }
+	    for (i=0; i<TNO1; i++){
+	      OLPpo[direction][order][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	    }
+	  }
+	}
+      }
+    }
+
+    /* Added by N. Yamaguchi ***/
+#else
+    OLPpo=(double******)malloc(sizeof(double*****)*3);
+    for (direction=0; direction<3; direction++){
+      OLPpo[direction]=(double*****)malloc(sizeof(double****)*order_max);
+      for (order=0; order<order_max; order++){
+	OLPpo[direction][order]=(double****)malloc(sizeof(double***)*(atomnum+1));
+	for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	  TNO1 = Total_NumOrbs[ct_AN];
+	  OLPpo[direction][order][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+	  for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	    OLPpo[direction][order][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	    if (ct_AN==0){
+	      TNO2 = 1;
+	    }
+	    else{
+	      Gh_AN = natn_HWF[ct_AN][h_AN];
+	      TNO2 = Total_NumOrbs[Gh_AN];
+	    }
+	    for (i=0; i<TNO1; i++){
+	      OLPpo[direction][order][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	    }
+	  }
+	}
+      }
+    }
+#endif
+    /* ***/
+
+  } else {
+#endif
+    /* ***/
+
+    /* Added by N. Yamaguchi ***/
+#ifndef HWF
+    /* ***/
+
+    OLPpox = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      OLPpox[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	OLPpox[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  OLPpox[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+
+    OLPpoy = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      OLPpoy[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	OLPpoy[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  OLPpoy[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+
+    OLPpoz = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      OLPpoz[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	OLPpoz[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  OLPpoz[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+
+    /* Added by N. Yamaguchi ***/
+#else
+    OLPpox = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      OLPpox[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	OLPpox[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn_HWF[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  OLPpox[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+
+    OLPpoy = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      OLPpoy[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	OLPpoy[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn_HWF[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  OLPpoy[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+
+    OLPpoz = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      OLPpoz[ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	OLPpoz[ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){
+	  TNO2 = 1;
+	}
+	else{
+	  Gh_AN = natn_HWF[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  OLPpoz[ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+#endif
+    /* ***/
+
+    /* Added by N. Yamaguchi ***/
+#ifndef OLPPOLINEAR
+  }
+#endif
+  /* ***/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  DM = (double*****)malloc(sizeof(double****)*(SpinP_switch+1));
+  for (spin=0; spin<=SpinP_switch; spin++){
+
+    DM[spin] = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      DM[spin][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	DM[spin][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){ 
+	  TNO2 = 1;
+	}
+	else{ 
+	  Gh_AN = natn[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  DM[spin][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  DM_HWF = (double*****)malloc(sizeof(double****)*(SpinP_switch+1));
+  for (spin=0; spin<=SpinP_switch; spin++){
+
+    DM_HWF[spin] = (double****)malloc(sizeof(double***)*(atomnum+1));
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      DM_HWF[spin][ct_AN] = (double***)malloc(sizeof(double**)*(FNAN_HWF[ct_AN]+1));
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	DM_HWF[spin][ct_AN][h_AN] = (double**)malloc(sizeof(double*)*TNO1);
+
+	if (ct_AN==0){ 
+	  TNO2 = 1;
+	}
+	else{ 
+	  Gh_AN = natn_HWF[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	}
+	for (i=0; i<TNO1; i++){
+	  DM_HWF[spin][ct_AN][h_AN][i] = (double*)malloc(sizeof(double)*TNO2);
+	}
+      }
+    }
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    Hamiltonian matrix
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	Gh_AN = natn[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(Hks[spin][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	Gh_AN = natn_HWF[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(Hks[spin][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+iHks:
+imaginary Kohn-Sham matrix elements of basis orbitals
+for alpha-alpha, beta-beta, and alpha-beta spin matrices
+of which contributions come from spin-orbit coupling 
+and Hubbard U effective potential.
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  if (SpinP_switch==3){
+    for (spin=0; spin<3; spin++){
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	  Gh_AN = natn[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	  for (i=0; i<TNO1; i++){
+	    FREAD(iHks[spin][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	  }
+	}
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  if (SpinP_switch==3){
+    for (spin=0; spin<3; spin++){
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	  Gh_AN = natn_HWF[ct_AN][h_AN];
+	  TNO2 = Total_NumOrbs[Gh_AN];
+	  for (i=0; i<TNO1; i++){
+	    FREAD(iHks[spin][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	  }
+	}
+      }
+    }
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    Overlap matrix
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    TNO1 = Total_NumOrbs[ct_AN];
+    for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+      Gh_AN = natn[ct_AN][h_AN];
+      TNO2 = Total_NumOrbs[Gh_AN];
+      for (i=0; i<TNO1; i++){
+	FREAD(OLP[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+    TNO1 = Total_NumOrbs[ct_AN];
+    for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+      Gh_AN = natn_HWF[ct_AN][h_AN];
+      TNO2 = Total_NumOrbs[Gh_AN];
+      for (i=0; i<TNO1; i++){
+	FREAD(OLP_HWF[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+      }
+    }
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    Overlap matrix with position operator
+    (added by N. Yamaguchi for HWC)
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef OLPPOLINEAR
+  if (version){
+    int direction, order;
+    for (direction=0; direction<3; direction++){
+      for (order=0; order<order_max; order++){
+	for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	  TNO1 = Total_NumOrbs[ct_AN];
+
+	  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+	  /* ***/
+
+	  for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	    Gh_AN = natn[ct_AN][h_AN];
+	    TNO2 = Total_NumOrbs[Gh_AN];
+	    for (i=0; i<TNO1; i++){
+	      FREAD(OLPpo[direction][order][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+
+	      /* Added by N. Yamaguchi ***/
+#ifdef DEBUG_HWF_AB
+	      if (myid==0){
+		printf("<OLP> %d %d %f\n", order, direction, OLPpo[direction][order][ct_AN][h_AN][i][0]);
+	      }
+#endif
+	      /* ***/
+
+	    }
+	  }
+
+	  /* Added by N. Yamaguchi ***/
+#else
+	  for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	    Gh_AN = natn_HWF[ct_AN][h_AN];
+	    TNO2 = Total_NumOrbs[Gh_AN];
+	    for (i=0; i<TNO1; i++){
+	      FREAD(OLPpo[direction][order][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+
+	      /* Added by N. Yamaguchi ***/
+#ifdef DEBUG_HWF_AB
+	      if (myid==0){
+		printf("<OLP> %d %d %f\n", order, direction, OLPpo[direction][order][ct_AN][h_AN][i][0]);
+	      }
+#endif
+	      /* ***/
+
+	    }
+	  }
+#endif
+	  /* ***/
+
+	}
+      }
+    }
+  } else {
+#endif
+    /****************************************************
+      Overlap matrix with position operator x
+     ****************************************************/
+
+    /* Added by N. Yamaguchi ***/
+#ifndef HWF
+    /* ***/
+
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	Gh_AN = natn[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(OLPpox[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+
+    /* Added by N. Yamaguchi ***/
+#else
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	Gh_AN = natn_HWF[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(OLPpox[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+#endif
+    /* ***/
+
+    /****************************************************
+      Overlap matrix with position operator y
+     ****************************************************/
+
+    /* Added by N. Yamaguchi ***/
+#ifndef HWF
+    /* ***/
+
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	Gh_AN = natn[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(OLPpoy[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+
+    /* Added by N. Yamaguchi ***/
+#else
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	Gh_AN = natn_HWF[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(OLPpoy[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+#endif
+    /* ***/
+
+    /****************************************************
+      Overlap matrix with position operator z
+     ****************************************************/
+
+    /* Added by N. Yamaguchi ***/
+#ifndef HWF
+    /* ***/
+
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	Gh_AN = natn[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(OLPpoz[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+
+    /* Added by N. Yamaguchi ***/
+#else
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	Gh_AN = natn_HWF[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(OLPpoz[ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+#endif
+    /* ***/
+
+#ifndef OLPPOLINEAR
+  }
+#endif
+  /* ***/
+
+  /****************************************************
+    Density matrix
+   ****************************************************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  /* ***/
+
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	Gh_AN = natn[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(DM[spin][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+  }
+
+  /* Added by N. Yamaguchi ***/
+#else
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	Gh_AN = natn_HWF[ct_AN][h_AN];
+	TNO2 = Total_NumOrbs[Gh_AN];
+	for (i=0; i<TNO1; i++){
+	  FREAD(DM_HWF[spin][ct_AN][h_AN][i],sizeof(double),TNO2,fp);
+	}
+      }
+    }
+  }
+#endif
+
+  if (version>=2){
+    FREAD(&HWF_HWF, sizeof(int), 1, fp);
+    if (HWF_HWF){
+      int Nc;
+      atomicNumber = (int*)malloc(sizeof(int)*atomnum);
+      FREAD(atomicNumber, sizeof(int), atomnum, fp);
+#ifndef HWF
+      FREAD(Grid_Origin, sizeof(double), 4, fp);
+      FREAD(gtv[1], sizeof(double), 4, fp);
+      FREAD(gtv[2], sizeof(double), 4, fp);
+      FREAD(gtv[3], sizeof(double), 4, fp);
+      FREAD(&Ngrid1, sizeof(int), 1, fp);
+      FREAD(&Ngrid2, sizeof(int), 1, fp);
+      FREAD(&Ngrid3, sizeof(int), 1, fp);
+      FREAD(&TNumGrid, sizeof(int), 1, fp);
+      GridN_Atom=(int*)malloc(sizeof(int)*(atomnum+1));
+      FREAD(GridN_Atom+1, sizeof(int), atomnum, fp);
+      GridListAtom = (int**)malloc(sizeof(int*)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	GridListAtom[ct_AN] = (int*)malloc(sizeof(int)*GridN_Atom[ct_AN]);
+      }
+      CellListAtom = (int**)malloc(sizeof(int*)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	CellListAtom[ct_AN] = (int*)malloc(sizeof(int)*GridN_Atom[ct_AN]);
+      }
+      Orbs_Grid = (Type_Orbs_Grid***)malloc(sizeof(Type_Orbs_Grid**)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	Orbs_Grid[ct_AN] = (Type_Orbs_Grid**)malloc(sizeof(Type_Orbs_Grid*)*GridN_Atom[ct_AN]);
+	for (Nc=0; Nc<GridN_Atom[ct_AN]; Nc++){
+	  Orbs_Grid[ct_AN][Nc] = (Type_Orbs_Grid*)malloc(sizeof(Type_Orbs_Grid)*TNO1);
+	}
+      }
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	FREAD(GridListAtom[ct_AN], sizeof(int), GridN_Atom[ct_AN], fp);
+      }
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	FREAD(CellListAtom[ct_AN], sizeof(int), GridN_Atom[ct_AN], fp);
+      }
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	for (Nc=0; Nc<GridN_Atom[ct_AN]; Nc++){
+	  FREAD(Orbs_Grid[ct_AN][Nc], sizeof(Type_Orbs_Grid), TNO1, fp);
+	}
+      }
+#else
+      FREAD(Grid_Origin_HWF, sizeof(double), 4, fp);
+      FREAD(gtv_HWF[1], sizeof(double), 4, fp);
+      FREAD(gtv_HWF[2], sizeof(double), 4, fp);
+      FREAD(gtv_HWF[3], sizeof(double), 4, fp);
+      FREAD(&Ngrid1_HWF, sizeof(int), 1, fp);
+      FREAD(&Ngrid2_HWF, sizeof(int), 1, fp);
+      FREAD(&Ngrid3_HWF, sizeof(int), 1, fp);
+      FREAD(&TNumGrid_HWF, sizeof(int), 1, fp);
+      GridN_Atom_HWF=(int*)malloc(sizeof(int)*(atomnum+1));
+      FREAD(GridN_Atom_HWF+1,sizeof(int),atomnum,fp);
+      GridListAtom_HWF = (int**)malloc(sizeof(int*)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	GridListAtom_HWF[ct_AN] = (int*)malloc(sizeof(int)*GridN_Atom_HWF[ct_AN]);
+      }
+      CellListAtom_HWF = (int**)malloc(sizeof(int*)*(atomnum+1));
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	CellListAtom_HWF[ct_AN] = (int*)malloc(sizeof(int)*GridN_Atom_HWF[ct_AN]);
+      }
+      Orbs_Grid_HWF = (Type_Orbs_Grid***)malloc(sizeof(Type_Orbs_Grid**)*(atomnum+1));
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	Orbs_Grid_HWF[ct_AN] = (Type_Orbs_Grid**)malloc(sizeof(Type_Orbs_Grid*)*GridN_Atom_HWF[ct_AN]);
+	for (Nc=0; Nc<GridN_Atom_HWF[ct_AN]; Nc++){
+	  Orbs_Grid_HWF[ct_AN][Nc] = (Type_Orbs_Grid*)malloc(sizeof(Type_Orbs_Grid)*TNO1);
+	}
+      }
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	FREAD(GridListAtom_HWF[ct_AN], sizeof(int), GridN_Atom_HWF[ct_AN], fp);
+      }
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	FREAD(CellListAtom_HWF[ct_AN], sizeof(int), GridN_Atom_HWF[ct_AN], fp);
+      }
+      for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	for (Nc=0; Nc<GridN_Atom_HWF[ct_AN]; Nc++){
+	  FREAD(Orbs_Grid_HWF[ct_AN][Nc], sizeof(Type_Orbs_Grid), TNO1, fp);
+	}
+      }
+#endif
+    }
+  }
+  /* ***/
+
+
+  /****************************************************
+    Solver
+   ****************************************************/
+
+  FREAD(i_vec,sizeof(int),1,fp);
+  Solver = i_vec[0];
+
+  /****************************************************
+    ChemP
+    Temp
+   ****************************************************/
+
+  FREAD(d_vec,sizeof(double),10,fp);
+  ChemP  = d_vec[0];
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  E_Temp = d_vec[1];
+#else
+  E_Temp_HWF = d_vec[1];
+#endif
+  /* ***/
+
+  dipole_moment_core[1] = d_vec[2]; 
+  dipole_moment_core[2] = d_vec[3]; 
+  dipole_moment_core[3] = d_vec[4]; 
+  dipole_moment_background[1] = d_vec[5]; 
+  dipole_moment_background[2] = d_vec[6]; 
+  dipole_moment_background[3] = d_vec[7]; 
+  Valence_Electrons = d_vec[8]; 
+  Total_SpinS = d_vec[9];
+
+  /* Added by N. Yamaguchi ***/
+  /****************************************************
+    Core Charge (added by N. Yamaguchi for HWC)
+   ****************************************************/
+
+  if (version){
+    cc_vec = (double*)malloc(sizeof(double)*atomnum);
+    FREAD(cc_vec,sizeof(double),atomnum,fp);
+  }
+#ifdef HWF
+  return;
+#endif
+  /* ***/
+
+  /****************************************************
+    input file
+   ****************************************************/
+
+  FREAD(i_vec, sizeof(int), 1, fp);
+  num_lines = i_vec[0];
+
+  sprintf(makeinp,"temporal_12345.input");
+
+  if ((fp_makeinp = fopen(makeinp,"w")) != NULL){
+
+#ifdef xt3
+    setvbuf(fp_makeinp,buf,_IOFBF,fp_bsize);  /* setvbuf */
+#endif
+
+    for (i=1; i<=num_lines; i++){
+      FREAD(strg, sizeof(char), MAX_LINE_SIZE, fp);
+      fprintf(fp_makeinp,"%s",strg);
+    }
+    fclose(fp_makeinp);
+  }
+}
+
+
+
+/* Added by N. Yamaguchi ***/
+#ifdef SOField
+/* ***/
+
+void free_scfout()
+{
+  static int ct_AN,h_AN,i,j;
+  static int TNO1,TNO2,spin,Rn;
+
+  /**free_array*******
+    double *****DM;
+    double *****Hks;
+    double *****iHks;
+    double ****OLP;
+    double ****OLPpox;
+    double ****OLPpoy;
+    double ****OLPpoz;
+    int **atv_ijk;
+    double **atv;
+    int *FNAN;
+    int *Total_NumOrbs;
+    int **ncn;
+    int **natn;
+    double **Gxyz;
+   *******************/
+
+  /* Added by N. Yamaguchi ***/
+#ifndef HWF
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(DM[spin][ct_AN][h_AN][i]);
+	}free(DM[spin][ct_AN][h_AN]);
+      }free(DM[spin][ct_AN]);
+    }free(DM[spin]);
+  }free(DM);
+  /* ***/
+
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(Hks[spin][ct_AN][h_AN][i]);
+	}free(Hks[spin][ct_AN][h_AN]);
+      }free(Hks[spin][ct_AN]);
+    }free(Hks[spin]);
+  }free(Hks);
+  /* Added by N. Yamaguchi ***/
+  if (SpinP_switch==3){
+    /* ***/
+    for (spin=0; spin<3; spin++){
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	  for (i=0; i<TNO1; i++){
+	    free(iHks[spin][ct_AN][h_AN][i]);
+	  }free(iHks[spin][ct_AN][h_AN]);
+	}free(iHks[spin][ct_AN]);
+      }free(iHks[spin]);
+    }free(iHks);
+    /* Added by N. Yamaguchi ***/
+  }
+  /* ***/
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    TNO1 = Total_NumOrbs[ct_AN];
+    for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+      for (i=0; i<TNO1; i++){
+	free(OLP[ct_AN][h_AN][i]);
+      }free(OLP[ct_AN][h_AN]);
+    }free(OLP[ct_AN]);
+  }free(OLP);
+
+  /* Added by N. Yamaguchi ***/
+  if (version==0){
+    /* ***/
+
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(OLPpox[ct_AN][h_AN][i]);
+	}free(OLPpox[ct_AN][h_AN]);
+      }free(OLPpox[ct_AN]);
+    }free(OLPpox);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(OLPpoy[ct_AN][h_AN][i]);
+	}free(OLPpoy[ct_AN][h_AN]);
+      }free(OLPpoy[ct_AN]);
+    }free(OLPpoy);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(OLPpoz[ct_AN][h_AN][i]);
+	}free(OLPpoz[ct_AN][h_AN]);
+      }free(OLPpoz[ct_AN]);
+    }free(OLPpoz);
+
+    /* Added by N. Yamaguchi ***/
+  }
+  /* ***/
+
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    free(atv[Rn]);
+  }free(atv);
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    free(atv_ijk[Rn]);
+  }free(atv_ijk);
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    free(natn[ct_AN]);
+  }free(natn);
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    free(ncn[ct_AN]);
+  }free(ncn);
+  for (i=0; i<(atomnum+1); i++){
+    free(Gxyz[i]);
+  }free(Gxyz);
+
+  /* Added by N. Yamaguchi ***/
+  if (version) {
+    /*******************************************************
+      double ******OLPpo; (added by N. Yamaguchi for HWC)
+     *******************************************************/
+    int direction, order;
+    for (direction=0; direction<3; direction++){
+      for (order=0; order<order_max; order++){
+	for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	  TNO1 = Total_NumOrbs[ct_AN];
+	  for (h_AN=0; h_AN<=FNAN[ct_AN]; h_AN++){
+	    for (i=0; i<TNO1; i++){
+	      free(OLPpo[direction][order][ct_AN][h_AN][i]);
+	    }
+	    free(OLPpo[direction][order][ct_AN][h_AN]);
+	  }
+	  free(OLPpo[direction][order][ct_AN]);
+	}
+	free(OLPpo[direction][order]);
+      }
+      free(OLPpo[direction]);
+    }
+    free(OLPpo);
+  }
+  /* ***/
+
+  free(FNAN);
+
+  /* Added by N. Yamaguchi ***/
+  if (version>=2 && HWF_HWF){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      free(GridListAtom[ct_AN]);
+    }
+    free(GridListAtom);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      free(CellListAtom[ct_AN]);
+    }
+    free(CellListAtom);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      int Nc;
+      for (Nc=0; Nc<GridN_Atom[ct_AN]; Nc++){
+	free(Orbs_Grid[ct_AN][Nc]);
+      }
+      free(Orbs_Grid[ct_AN]);
+    }
+    free(Orbs_Grid);
+    free(GridN_Atom);
+  }
+#else
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(DM_HWF[spin][ct_AN][h_AN][i]);
+	}free(DM_HWF[spin][ct_AN][h_AN]);
+      }free(DM_HWF[spin][ct_AN]);
+    }free(DM_HWF[spin]);
+  }free(DM_HWF);
+  for (spin=0; spin<=SpinP_switch; spin++){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(Hks[spin][ct_AN][h_AN][i]);
+	}free(Hks[spin][ct_AN][h_AN]);
+      }free(Hks[spin][ct_AN]);
+    }free(Hks[spin]);
+  }free(Hks);
+  /* Added by N. Yamaguchi ***/
+  if (SpinP_switch==3){
+    /* ***/
+    for (spin=0; spin<3; spin++){
+      for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	TNO1 = Total_NumOrbs[ct_AN];
+	for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	  for (i=0; i<TNO1; i++){
+	    free(iHks[spin][ct_AN][h_AN][i]);
+	  }free(iHks[spin][ct_AN][h_AN]);
+	}free(iHks[spin][ct_AN]);
+      }free(iHks[spin]);
+    }free(iHks);
+    /* Added by N. Yamaguchi ***/
+  }
+  /* ***/
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    TNO1 = Total_NumOrbs[ct_AN];
+    for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+      for (i=0; i<TNO1; i++){
+	free(OLP_HWF[ct_AN][h_AN][i]);
+      }free(OLP_HWF[ct_AN][h_AN]);
+    }free(OLP_HWF[ct_AN]);
+  }free(OLP_HWF);
+  if (version==0){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(OLPpox[ct_AN][h_AN][i]);
+	}free(OLPpox[ct_AN][h_AN]);
+      }free(OLPpox[ct_AN]);
+    }free(OLPpox);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(OLPpoy[ct_AN][h_AN][i]);
+	}free(OLPpoy[ct_AN][h_AN]);
+      }free(OLPpoy[ct_AN]);
+    }free(OLPpoy);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      TNO1 = Total_NumOrbs[ct_AN];
+      for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	for (i=0; i<TNO1; i++){
+	  free(OLPpoz[ct_AN][h_AN][i]);
+	}free(OLPpoz[ct_AN][h_AN]);
+      }free(OLPpoz[ct_AN]);
+    }free(OLPpoz);
+  }
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    free(atv_HWF[Rn]);
+  }free(atv_HWF);
+  for (Rn=0; Rn<=TCpyCell; Rn++){
+    free(atv_ijk_HWF[Rn]);
+  }free(atv_ijk_HWF);
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    free(natn_HWF[ct_AN]);
+  }free(natn_HWF);
+  for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+    free(ncn_HWF[ct_AN]);
+  }free(ncn_HWF);
+  if (version) {
+    /*******************************************************
+      double ******OLPpo; (added by N. Yamaguchi for HWC)
+     *******************************************************/
+    int direction, order;
+    for (direction=0; direction<3; direction++){
+      for (order=0; order<order_max; order++){
+	for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+	  TNO1 = Total_NumOrbs[ct_AN];
+	  for (h_AN=0; h_AN<=FNAN_HWF[ct_AN]; h_AN++){
+	    for (i=0; i<TNO1; i++){
+	      free(OLPpo[direction][order][ct_AN][h_AN][i]);
+	    }
+	    free(OLPpo[direction][order][ct_AN][h_AN]);
+	  }
+	  free(OLPpo[direction][order][ct_AN]);
+	}
+	free(OLPpo[direction][order]);
+      }
+      free(OLPpo[direction]);
+    }
+    free(OLPpo);
+  }
+  free(FNAN_HWF);
+  if (version>=2 && HWF_HWF){
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      free(GridListAtom_HWF[ct_AN]);
+    }
+    free(GridListAtom_HWF);
+    for (ct_AN=0; ct_AN<=atomnum; ct_AN++){
+      free(CellListAtom_HWF[ct_AN]);
+    }
+    free(CellListAtom_HWF);
+    for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+      int Nc;
+      for (Nc=0; Nc<GridN_Atom_HWF[ct_AN]; Nc++){
+	free(Orbs_Grid_HWF[ct_AN][Nc]);
+      }
+      free(Orbs_Grid_HWF[ct_AN]);
+    }
+    free(Orbs_Grid_HWF);
+    free(GridN_Atom_HWF);
+    free(atomicNumber);
+  }
+#endif
+  if (version) {
+    /*******************************************************
+      double *cc_vec; (added by N. Yamaguchi for HWC)
+     *******************************************************/
+    free(cc_vec);
+  }
+  free(Total_NumOrbs);
+  /* ***/
+
+}
+
+/* Added by N. Yamaguchi ***/
+#endif
+#endif
+/* ***/
+
+
+
+
+
+
+
+
+
