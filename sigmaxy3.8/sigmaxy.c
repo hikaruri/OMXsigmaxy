@@ -207,8 +207,8 @@ int main(int argc, char *argv[]) {
            "potential\n");
     printf(" by expanded Fukui-Hatsugai-Suzuki method\n");
     printf(" [J. Phys. Soc. Jpn. 74, 1674 (2005)].\n");
-    printf(" Copyright (C), 2022, Hikaru Sawahata, Naoya Yamaguchi,\n");
-    printf(" Susumu Minami and Fumiyuki Ishii\n");
+    printf(" Copyright (C), 2006-2022, Hikaru Sawahata, Naoya Yamaguchi,\n");
+    printf(" Susumu Minami, Fumiyuki Ishii and Taisuke Ozaki\n");
     printf(" This is free software, and you are welcome to         \n");
     printf(" redistribute it under the constitution of the GNU-GPL.\n");
     printf(" Please cite the following article:\n");
