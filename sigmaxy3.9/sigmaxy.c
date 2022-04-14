@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
     printf(" redistribute it under the constitution of the GNU-GPL.\n");
     printf(" Please cite the following article:\n");
     printf(" H. Sawahata, N. Yamaguchi, S. Minami and F. Ishii,\n");
-    printf(" arXiv:2204.05949 (2021).\n");
+    printf(" arXiv:2204.05949 (2022).\n");
     printf(
         "******************************************************************\n");
     printf(
