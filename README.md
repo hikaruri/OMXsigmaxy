@@ -63,3 +63,5 @@ For example, in Febcc case,
 this code compute a chemical potential dependence of 
 \sigma_{xy} -0.5 eV to 0.5 eV
 (energy mesh number is 400 and descritized integration mesh is 100\*100\*100).
+
+When you choose a 2D option, sigmaxy compute AHC of k_3 surface (sigma_{xy}).
